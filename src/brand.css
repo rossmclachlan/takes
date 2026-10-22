@@ -1,0 +1,253 @@
+/*
+ * Homegrown: the visual foundation Mise, Priorities and Takes share.
+ * Copied from rossmclachlan/Mise (src/components/ui/brand.css); keep in step.
+ *
+ * Both apps import this after `@import "tailwindcss"`, then set their own
+ * colours (accent, second, bg, surface, outline) and --font-display in their
+ * index.css. Everything here reads those role tokens, so one class looks like
+ * Mise in Mise and like Priorities in Priorities.
+ *
+ * The Look setting (Calm / Sunny / Wild, see whimsy.ts) is a data-whimsy
+ * attribute on <html> that only changes the few values below.
+ */
+
+@theme {
+  --font-sans: "Bricolage Grotesque Variable", ui-rounded, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Soil: text, outlines and sticker shadows in both apps. */
+  --color-ink: #22261C;
+  --color-ink-variant: #5E6455;
+  /* Sun: the family signature. Counts, the add button, celebrations, focus. */
+  --color-sun: #FFC83D;
+  --color-sun-container: #FFEDB8;
+
+  --color-good: #2F7A45;
+  --color-good-container: #DDF0D9;
+  --color-on-good-container: #1B4A2A;
+  --color-late: #B4580E;
+  --color-error: #C93A2B;
+  --color-error-container: #FBE1DC;
+  --color-on-error-container: #7A2318;
+}
+
+/* Wild is the default; a saved choice sets data-whimsy before first paint. */
+:root {
+  --stk-bw: 2px;
+  --stick: 5px;
+  --stk-soft: 0 0 0 transparent;
+  --tilt: -5deg;
+  --grain: 0.5;
+  --pebble: 58% 42% 55% 45% / 48% 56% 44% 52%;
+}
+/* .look-* set one level locally, for the previews in the Look picker. */
+.look-wild {
+  --stk-bw: 2px;
+  --stick: 5px;
+  --stk-soft: 0 0 0 transparent;
+  --tilt: -5deg;
+}
+:root[data-whimsy="sunny"],
+.look-sunny {
+  --stk-bw: 2px;
+  --stick: 3px;
+  --stk-soft: 0 0 0 transparent;
+  --tilt: -2deg;
+  --grain: 0.32;
+}
+:root[data-whimsy="calm"],
+.look-calm {
+  --stk-bw: 0px;
+  --stick: 0px;
+  --stk-soft: 0 1px 3px rgb(34 38 28 / 0.12), 0 3px 10px rgb(34 38 28 / 0.06);
+  --tilt: 0deg;
+  --grain: 0;
+}
+
+/* A soil outline with a hard offset shadow (utilities, so classes can @apply them). */
+@utility sticker {
+  border: var(--stk-bw) solid var(--color-ink);
+  box-shadow: var(--stick) var(--stick) 0 var(--color-ink), var(--stk-soft);
+}
+@utility sticker-sm {
+  border: 1.5px solid var(--color-ink);
+  box-shadow: calc(var(--stick) * 0.6) calc(var(--stick) * 0.6) 0 var(--color-ink), var(--stk-soft);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-bg);
+    color: var(--color-ink);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button {
+    font-family: inherit;
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--color-sun);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* The app's root: paper with a faint grain behind the content. */
+  .paper {
+    isolation: isolate;
+  }
+  .paper::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: var(--grain);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .45 0 0 0 0 .4 0 0 0 0 .3 0 0 0 .22 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .card {
+    @apply rounded-2xl border-[1.5px] border-outline bg-surface;
+  }
+
+  .label-section {
+    @apply text-[11px] font-extrabold uppercase tracking-[0.1em] text-ink-variant;
+  }
+
+  /* Page and section headings in the app's display face. */
+  .heading-page {
+    @apply font-display text-[30px] leading-tight font-normal text-ink;
+  }
+  .heading-section {
+    @apply font-display text-[24px] leading-tight font-normal text-ink;
+  }
+
+  .count-badge {
+    @apply inline-flex min-w-6 items-center justify-center rounded-full border-[1.5px] border-ink bg-sun px-2 text-xs leading-5 font-extrabold text-ink tabular-nums;
+    transform: rotate(var(--tilt));
+  }
+
+  /* Buttons */
+  .btn-filled {
+    @apply sticker inline-flex items-center justify-center gap-1.5 rounded-full bg-accent px-6 py-3 text-sm font-bold text-white transition disabled:opacity-40;
+  }
+  .btn-filled:not(:disabled):active {
+    transform: translate(var(--stick), var(--stick));
+    box-shadow: 0 0 0 var(--color-ink), var(--stk-soft);
+  }
+
+  .btn-tonal {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full bg-accent-container px-5 py-2.5 text-sm font-bold text-on-accent-container transition active:opacity-80 disabled:opacity-40;
+  }
+
+  .btn-outlined {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full border-[1.5px] border-ink bg-transparent px-5 py-2.5 text-sm font-bold text-ink transition active:bg-surface-variant disabled:opacity-40;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full border-[1.5px] border-error bg-transparent px-5 py-2.5 text-sm font-bold text-error transition active:bg-error-container disabled:opacity-40;
+  }
+
+  .btn-icon {
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-[1.5px] border-outline bg-surface text-ink transition active:bg-surface-variant;
+  }
+
+  /* The add button: a sun-yellow pebble, the same object in both apps. */
+  .fab {
+    @apply sticker flex h-14 w-14 items-center justify-center bg-sun text-ink transition;
+    border-radius: var(--pebble);
+    transform: rotate(var(--tilt));
+  }
+  .fab:active {
+    transform: rotate(var(--tilt)) translate(var(--stick), var(--stick));
+    box-shadow: 0 0 0 var(--color-ink), var(--stk-soft);
+  }
+
+  .input-field {
+    @apply rounded-2xl border-[1.5px] border-outline bg-surface px-3.5 py-2.5 text-base text-ink placeholder:text-ink-variant focus:border-ink focus:outline-none;
+  }
+  .input-field:focus,
+  .input-field:focus-within {
+    box-shadow: 0 0 0 4px rgb(255 200 61 / 0.55);
+  }
+
+  .chip {
+    @apply inline-flex items-center justify-center gap-1 rounded-full border-[1.5px] border-outline bg-surface px-3 py-1.5 text-sm font-semibold text-ink transition active:bg-surface-variant;
+  }
+  .chip-on {
+    @apply sticker-sm bg-accent text-white;
+  }
+
+  .checkbox-indicator {
+    @apply flex shrink-0 items-center justify-center rounded-[8px] border-2 transition;
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Seal: the scalloped sunburst that holds each app's emoji. */
+  .seal-path {
+    stroke: var(--color-ink);
+    stroke-width: calc(var(--stk-bw) * 2.2);
+  }
+  .seal-shadow {
+    fill: var(--color-ink);
+    transform: translate(calc(var(--stick) * 1.4), calc(var(--stick) * 1.4));
+  }
+}
+
+/* Completion moments: a tick that bounces, a scribble, a sprout. */
+@keyframes hg-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+@keyframes hg-pop {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.4) rotate(0); }
+  25% { opacity: 1; transform: translate(4px, -18px) scale(1.2) rotate(-12deg); }
+  100% { opacity: 0; transform: translate(14px, -46px) scale(0.9) rotate(12deg); }
+}
+@keyframes hg-bounce {
+  0% { transform: scale(0.8); }
+  60% { transform: scale(1.15) rotate(var(--tilt)); }
+  100% { transform: scale(1) rotate(var(--tilt)); }
+}
+@keyframes hg-spin {
+  to { transform: rotate(360deg); }
+}
+
+.hg-scribble path {
+  stroke-dasharray: 1;
+  animation: hg-draw 0.45s ease-out;
+}
+.hg-pop {
+  animation: hg-pop 0.9s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+.hg-bounce {
+  animation: hg-bounce 0.35s cubic-bezier(0.3, 1.8, 0.5, 1) forwards;
+}
+:root:not([data-whimsy]) .seal-turn {
+  animation: hg-spin 24s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hg-scribble path,
+  .hg-pop,
+  .hg-bounce,
+  .seal-turn {
+    animation: none !important;
+  }
+  .hg-pop {
+    display: none;
+  }
+}

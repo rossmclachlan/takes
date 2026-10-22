@@ -1,0 +1,27 @@
+@import "tailwindcss";
+/* The foundation shared with Mise and Priorities; this file only sets Takes' own colours and face. */
+@import "./brand.css";
+
+/* Takes: the tape box. Kraft paper, cassette-label indigo, and a green for finished songs. */
+@theme {
+  --font-display: "Fraunces Variable", Georgia, serif;
+  --color-bg: #F3EEE3;
+  --color-surface: #FFFDF8;
+  --color-surface-variant: #EBE4D6;
+  --color-outline: #DDD3BF;
+  --color-accent: #3A3F9E;
+  --color-accent-container: #DCDDF7;
+  --color-on-accent-container: #23266B;
+  /* Songs: the green of a finished take. */
+  --color-second: #2F7A45;
+  --color-second-container: #DDF0D9;
+  --color-on-second-container: #1B4A2A;
+}
+
+@layer components {
+  /* Status colours, used by chips and group headings. */
+  .status-done        { background-color: #DDF0D9; color: #1B4A2A; }
+  .status-working_on  { background-color: #FFEDB8; color: #6B4A00; }
+  .status-needs_work  { background-color: #FBE1DC; color: #7A2318; }
+  .status-to_revisit  { background-color: #DCDDF7; color: #23266B; }
+}
