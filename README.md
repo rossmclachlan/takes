@@ -16,7 +16,7 @@ Pixel Recorder ─ Google Takeout ─▶ NAS folder ─▶ takes-ingest ─▶ P
 ```
 
 - The backend is in [music-cms-mvp](https://github.com/rossmclachlan/music-cms-mvp): migration `017_takes.js` (collections `demo_takes`, `demo_tags`, `demo_markers`) and the `takes-ingest` container, which converts recordings in the demos folder and adds them to the inbox. Originals are never changed.
-- The app signs in with the same PocketBase `users` account as Nostalge and talks to `https://polky.tail9c3d82.ts.net` (override with the `VITE_POCKETBASE_URL` repo variable or a `.env`).
+- The app signs in with the same PocketBase `users` account as Nostalge and talks to `https://polky.tail9c3d82.ts.net:8443` (`tailscale serve` → PocketBase on 8095; 443 is the Nostalge MCP server) (override with the `VITE_POCKETBASE_URL` repo variable or a `.env`).
 - It works offline: the library is kept in IndexedDB, changes queue on the phone and go up when the NAS is reachable (`src/lib/store.ts`), and the next 25 inbox takes are downloaded ahead (`src/lib/audioCache.ts`).
 - Look: Homegrown, shared with Mise and Priorities (`src/brand.css` is a copy of Mise's `src/components/ui/brand.css`).
 

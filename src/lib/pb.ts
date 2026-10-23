@@ -1,8 +1,9 @@
 import PocketBase, { ClientResponseError } from 'pocketbase'
 
-// The music-cms PocketBase on the NAS, reached over Tailscale Funnel (same as Nostalge).
+// The music-cms PocketBase on the NAS, on port 8443 of its Tailscale address.
+// (Port 443 there is the Nostalge Claude connector, not PocketBase.)
 export const POCKETBASE_URL: string =
-  import.meta.env.VITE_POCKETBASE_URL || 'https://polky.tail9c3d82.ts.net'
+  import.meta.env.VITE_POCKETBASE_URL || 'https://polky.tail9c3d82.ts.net:8443'
 
 export const pb = new PocketBase(POCKETBASE_URL)
 pb.autoCancellation(false)
