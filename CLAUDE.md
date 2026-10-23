@@ -6,3 +6,4 @@
 - Audio is a protected file: it needs `pb.files.getToken()`. Cached audio is keyed per take in Cache Storage, not by URL.
 - Playwright's Chromium can't play AAC, so "This take could not be played" in headless tests is expected; real phone browsers play it.
 - Before pushing: `npm test && npm run lint && npm run build`.
+- Claude's integration token can't re-run or dispatch Actions; a deploy happens on the next push to main (or Ross re-runs it from the Actions tab).
