@@ -4,7 +4,9 @@ import type { Take } from './types'
 // Audio is a protected PocketBase file: its URL needs a short-lived file token,
 // so it can't be cached by URL. Downloads are kept in Cache Storage under a
 // stable key per take instead, which also makes them playable offline.
-const CACHE = 'takes-audio-v1'
+// v1 could hold the app's own HTML under a take's key (see remoteUrl), so it's dropped.
+const CACHE = 'takes-audio-v2'
+if (typeof caches !== 'undefined') void caches.delete('takes-audio-v1').catch(() => {})
 
 const hasCaches = typeof caches !== 'undefined'
 
@@ -22,7 +24,8 @@ async function fileToken(): Promise<string> {
 }
 
 export async function remoteUrl(t: Take): Promise<string> {
-  return pb.files.getUrl(t as never, t.audio, { token: await fileToken() })
+  // Takes are stored slimmed, without collectionName, and getUrl returns '' without it.
+  return pb.files.getUrl({ id: t.id, collectionName: 'demo_takes' }, t.audio, { token: await fileToken() })
 }
 
 export async function cachedBlob(t: Take): Promise<Blob | null> {
@@ -57,7 +60,7 @@ export function download(t: Take): Promise<boolean> {
       const cache = await caches.open(CACHE)
       if (await cache.match(k)) return true
       const resp = await fetch(await remoteUrl(t))
-      if (!resp.ok) return false
+      if (!resp.ok || !resp.headers.get('content-type')?.startsWith('audio/')) return false
       await cache.put(k, new Response(await resp.blob(), { headers: { 'content-type': 'audio/mp4' } }))
       return true
     } catch {
