@@ -12,6 +12,7 @@ export function Menu({ isOpen, onClose, onOpen }: { isOpen: boolean; onClose: ()
   const queue = useStore((s) => s.queue.length)
   const syncing = useStore((s) => s.syncing)
   const reachable = useStore((s) => s.reachable)
+  const lastError = useStore((s) => s.lastError)
   const quickSort = useStore((s) => s.quickSort)
   const lib = useStore((s) => library(s))
   const c = counts(lib)
@@ -60,6 +61,7 @@ export function Menu({ isOpen, onClose, onOpen }: { isOpen: boolean; onClose: ()
                 <RefreshCw size={17} className={syncing ? 'animate-spin' : ''} />
               </button>
             </div>
+            {!reachable && lastError && <p className="text-xs break-all text-ink-variant">{lastError}</p>}
             <p className="text-sm text-ink-variant tabular-nums">
               {c.inbox} in the inbox · {c.song} songs · {c.idea} ideas
             </p>

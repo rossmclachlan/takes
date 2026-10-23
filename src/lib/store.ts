@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { get, set } from 'idb-keyval'
 import { applyOps, enqueue, newId, type Library } from './ops'
-import { ensureSession, isNetworkError, pb, signedInEmail, statusOf } from './pb'
+import { ensureSession, isNetworkError, pb, POCKETBASE_URL, signedInEmail, statusOf } from './pb'
 import type { Collection, Marker, Op, Tag, Take } from './types'
 
 export interface State {
@@ -16,6 +16,8 @@ export interface State {
   syncing: boolean
   /** Whether the last attempt to reach the NAS worked. */
   reachable: boolean
+  /** Why the last attempt to reach the NAS failed, shown in the menu. */
+  lastError: string
   email: string
   notice: string
   /** Skip the sort sheet after a swipe. */
@@ -32,6 +34,7 @@ let state: State = {
   loaded: false,
   syncing: false,
   reachable: true,
+  lastError: '',
   email: signedInEmail(),
   notice: '',
   quickSort: false,
@@ -155,7 +158,7 @@ async function pull(full: boolean) {
       if (t.updated > lastSync) lastSync = t.updated
     }
     const server: Library = { takes: merged, tags: byId(tags), markers: byId(markers) }
-    setState({ server, lastSync, reachable: true })
+    setState({ server, lastSync, reachable: true, lastError: '' })
     await Promise.all([save(K.server, server), save(K.lastSync, lastSync)])
   } catch (err) {
     handleError(err)
@@ -224,7 +227,9 @@ function handleError(err: unknown) {
       if (s === 'signed-out') setState({ email: '' })
     })
   }
-  setState({ reachable: !isNetworkError(err) })
+  const reachable = !isNetworkError(err)
+  const detail = err instanceof Error ? err.message : String(err)
+  setState({ reachable, lastError: reachable ? '' : `Couldn’t reach ${POCKETBASE_URL} (${detail})` })
 }
 
 // ---- changes ------------------------------------------------------------------
