@@ -186,7 +186,9 @@ function SwipeCard({ take, onDecide, onTouch, onOpen }: { take: Take; onDecide: 
         setDrag({ x, y, active: true })
       }}
       onPointerUp={() => {
-        const moved = start.current?.moved
+        // Taps on the card's buttons never started a drag; they handle themselves.
+        if (!start.current) return
+        const moved = start.current.moved
         start.current = null
         if (dir) fly(dir)
         else setDrag({ x: 0, y: 0, active: false })
