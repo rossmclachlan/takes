@@ -1,16 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import { applyOps, enqueue, newId, type Library } from './ops'
-import { ideaGroups, inboxQueue, songGroups } from './library'
-import type { Op, Take } from './types'
+import { ideaGroups, inboxQueue, songGroups, suggestSongs, suggestTags, unfiledSongTakes } from './library'
+import type { Op, Song, Take } from './types'
 
 function take(id: string, over: Partial<Take> = {}): Take {
   return {
     id, title: id, audio: `${id}.m4a`, duration: 60, peaks: null, recorded_at: '2024-01-01 00:00:00.000Z',
-    source_path: '', kind: 'inbox', status: '', tags: [], notes: '', song: '', sorted_at: '', created: '', updated: '', ...over,
+    source_path: '', kind: 'inbox', status: '', tags: [], notes: '', sorted_at: '', created: '', updated: '', ...over,
   }
 }
 
-const lib = (takes: Take[]): Library => ({ takes: Object.fromEntries(takes.map((t) => [t.id, t])), tags: {}, markers: {} })
+const lib = (takes: Take[], songs: Song[] = []): Library => ({
+  takes: Object.fromEntries(takes.map((t) => [t.id, t])),
+  tags: {},
+  markers: {},
+  songs: Object.fromEntries(songs.map((s) => [s.id, s])),
+})
+
+function song(id: string, takes: string[], over: Partial<Song> = {}): Song {
+  return { id, title: id, status: 'to_revisit', notes: '', takes, created: '', updated: '', ...over }
+}
 
 describe('enqueue', () => {
   it('folds updates to the same record into one', () => {
@@ -73,15 +82,32 @@ describe('library views', () => {
     expect(inboxQueue(l, ['old']).map((t) => t.id)).toEqual(['mid', 'new', 'old'])
   })
 
-  it('groups songs by status and leaves extra takes under their song', () => {
-    const l = lib([
-      take('s1', { kind: 'song', status: 'done' }),
-      take('s2', { kind: 'song', status: 'working_on', title: 'Harbour Lights' }),
-      take('s2b', { kind: 'song', status: 'working_on', song: 's2' }),
-    ])
-    const groups = songGroups(l, '', 'all')
-    expect(groups.map((g) => [g.key, g.takes.map((t) => t.id)])).toEqual([['working_on', ['s2']], ['done', ['s1']]])
-    expect(songGroups(l, 'harbour', 'all').flatMap((g) => g.takes.map((t) => t.id))).toEqual(['s2'])
+  it('groups songs by status, searching their takes too, and lists takes not yet in a song', () => {
+    const l = lib(
+      [take('a', { kind: 'song' }), take('b', { kind: 'song', notes: 'slide guitar' }), take('c', { kind: 'song' }), take('d', { kind: 'song', title: 'loose' })],
+      [song('s1', ['a'], { status: 'done' }), song('s2', ['b', 'c'], { status: 'working_on', title: 'Harbour Lights' })],
+    )
+    expect(songGroups(l, '', 'all').map((g) => [g.key, g.songs.map((s) => s.id)])).toEqual([['working_on', ['s2']], ['done', ['s1']]])
+    expect(songGroups(l, 'slide', 'all').flatMap((g) => g.songs.map((s) => s.id))).toEqual(['s2'])
+    expect(unfiledSongTakes(l).map((t) => t.id)).toEqual(['d'])
+  })
+
+  it('suggests the song recorded in the same sitting, and tags from it', () => {
+    const l = {
+      ...lib(
+        [
+          take('a', { kind: 'song', recorded_at: '2024-05-01 20:00:00.000Z' }),
+          take('b', { kind: 'song', recorded_at: '2024-02-01 20:00:00.000Z' }),
+          take('i', { kind: 'idea', tags: ['g'], recorded_at: '2024-05-01 21:00:00.000Z' }),
+          take('new', { recorded_at: '2024-05-01 21:30:00.000Z', title: 'Wednesday at 21 30 keys' }),
+        ],
+        [song('old', ['b'], { updated: '2024-06-01' }), song('near', ['a'], { updated: '2024-01-01' })],
+      ),
+      tags: { g: { id: 'g', name: 'guitar', color: '' }, k: { id: 'k', name: 'keys', color: '' } },
+    }
+    expect(suggestSongs(l, l.takes.new).map((s) => s.id)).toEqual(['near', 'old'])
+    // "keys" is named in the title; "guitar" was used in the same sitting.
+    expect(suggestTags(l, l.takes.new).map((t) => t.name)).toEqual(['keys', 'guitar'])
   })
 
   it('shows an idea under each of its tags, untagged last', () => {

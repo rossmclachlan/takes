@@ -63,7 +63,7 @@ export function Menu({ isOpen, onClose, onOpen }: { isOpen: boolean; onClose: ()
             </div>
             {!reachable && lastError && <p className="text-xs break-all text-ink-variant">{lastError}</p>}
             <p className="text-sm text-ink-variant tabular-nums">
-              {c.inbox} in the inbox · {c.song} songs · {c.idea} ideas
+              {c.inbox} in the inbox · {c.songs} songs ({c.song} takes) · {c.idea} ideas
             </p>
           </div>
 

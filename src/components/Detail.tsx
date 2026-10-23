@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Bookmark, FastForward, Pause, Play, Rewind, Trash2, X } from 'lucide-react'
 import { clock, recordedLabel } from '../lib/format'
-import { linkedTo } from '../lib/library'
+import { songIndex } from '../lib/library'
 import { load, seek, skipBy, toggle, usePlayer } from '../lib/player'
-import { addMarker, deleteMarker, library, updateMarker, updateTake, useStore } from '../lib/store'
-import { DEFAULT_STATUS, type Kind, type Marker, type Take } from '../lib/types'
-import { TakeRow } from './Library'
-import { StatusPicker, TagPicker } from './SortFields'
+import { addMarker, addToSong, createSong, deleteMarker, library, removeFromSong, updateMarker, updateTake, useStore } from '../lib/store'
+import { type Kind, type Marker, type Take } from '../lib/types'
+import { SongRow } from './Library'
+import { NEW_SONG, SongPicker, StatusPicker, TagPicker } from './SortFields'
 import { Waveform } from './Waveform'
 
 const KINDS: { value: Kind; label: string }[] = [
@@ -16,7 +16,7 @@ const KINDS: { value: Kind; label: string }[] = [
   { value: 'binned', label: 'Binned' },
 ]
 
-export function Detail({ id, onBack, onOpen }: { id: string; onBack: () => void; onOpen: (id: string) => void }) {
+export function Detail({ id, onBack, onOpenSong }: { id: string; onBack: () => void; onOpenSong: (id: string) => void }) {
   const lib = useStore((s) => library(s))
   const take = lib.takes[id]
   const isCurrent = usePlayer((p) => p.takeId === id)
@@ -106,7 +106,6 @@ export function Detail({ id, onBack, onOpen }: { id: string; onBack: () => void;
               onClick={() =>
                 updateTake(take.id, {
                   kind: k.value,
-                  ...(k.value === 'song' && !take.status ? { status: DEFAULT_STATUS } : {}),
                   ...(k.value !== 'inbox' && !take.sorted_at ? { sorted_at: new Date().toISOString() } : {}),
                 })
               }
@@ -117,16 +116,18 @@ export function Detail({ id, onBack, onOpen }: { id: string; onBack: () => void;
         </div>
       </div>
 
-      {take.kind === 'song' && !take.song && (
+      {(take.kind === 'song' || take.kind === 'idea') && <SongField take={take} onOpenSong={onOpenSong} />}
+
+      {take.kind === 'idea' && (
         <div className="flex flex-col gap-2">
           <span className="label-section">Status</span>
-          <StatusPicker value={take.status} onChange={(status) => updateTake(take.id, { status })} />
+          <StatusPicker optional value={take.status} onChange={(status) => updateTake(take.id, { status })} />
         </div>
       )}
 
       <div className="flex flex-col gap-2">
         <span className="label-section">Tags</span>
-        <TagPicker value={take.tags} onChange={(tags) => updateTake(take.id, { tags })} />
+        <TagPicker take={take} value={take.tags} onChange={(tags) => updateTake(take.id, { tags })} />
       </div>
 
       <NotesField take={take} />
@@ -140,8 +141,6 @@ export function Detail({ id, onBack, onOpen }: { id: string; onBack: () => void;
           ))}
         </ul>
       </div>
-
-      <SongLink take={take} onOpen={onOpen} />
 
       {take.source_path && (
         <p className="text-xs break-all text-ink-variant">
@@ -218,49 +217,44 @@ function MarkerRow({ marker, onPlay }: { marker: Marker; onPlay: () => void }) {
   )
 }
 
-/** Ideas and extra takes point at a song; songs list what points at them. */
-function SongLink({ take, onOpen }: { take: Take; onOpen: (id: string) => void }) {
+/** The song this take is in, with a way to move it to another one or start a new one. */
+function SongField({ take, onOpenSong }: { take: Take; onOpenSong: (id: string) => void }) {
   const lib = useStore((s) => library(s))
-  const songs = useMemo(
-    () => Object.values(lib.takes).filter((t) => t.kind === 'song' && !t.song && t.id !== take.id).sort((a, b) => a.title.localeCompare(b.title)),
-    [lib.takes, take.id],
-  )
-  const linked = useMemo(() => linkedTo(lib, take.id), [lib, take.id])
-  const parent = take.song ? lib.takes[take.song] : null
+  const song = useMemo(() => songIndex(lib).get(take.id), [lib, take.id])
+  const [changing, setChanging] = useState(false)
+  const picking = changing || (!song && take.kind === 'song')
+
+  const pick = (id: string) => {
+    if (id === NEW_SONG) {
+      if (song) removeFromSong(song.id, take.id)
+      createSong({ title: take.title, takes: [take.id] })
+    } else if (id !== song?.id) addToSong(id, take.id)
+    setChanging(false)
+  }
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="label-section">{take.kind === 'song' && !take.song ? 'Linked takes and ideas' : 'Belongs to a song'}</span>
-      {!(take.kind === 'song' && linked.length) && (
-        <select
-          id="song-link"
-          className="input-field"
-          value={take.song}
-          onChange={(e) => updateTake(take.id, { song: e.target.value })}
-        >
-          <option value="">{songs.length ? 'Not linked to a song' : 'No songs to link to yet'}</option>
-          {songs.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.title}
-            </option>
-          ))}
-        </select>
-      )}
-      {parent && (
+      <span className="label-section">{take.kind === 'idea' ? 'Used in a song' : 'Song'}</span>
+      {song && (
         <ul className="card overflow-hidden">
           <li>
-            <TakeRow take={parent} onOpen={() => onOpen(parent.id)} />
+            <SongRow song={song} onOpen={() => onOpenSong(song.id)} />
           </li>
         </ul>
       )}
-      {linked.length > 0 && (
-        <ul className="card divide-y-[1.5px] divide-outline overflow-hidden">
-          {linked.map((t) => (
-            <li key={t.id}>
-              <TakeRow take={t} onOpen={() => onOpen(t.id)} />
-            </li>
-          ))}
-        </ul>
+      {picking ? (
+        <SongPicker take={take} value={song?.id ?? ''} onChange={pick} />
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="chip" onClick={() => setChanging(true)}>
+            {song ? 'Move to another song' : 'Add to a song'}
+          </button>
+          {song && (
+            <button type="button" className="chip" onClick={() => removeFromSong(song.id, take.id)}>
+              Take out of {song.title}
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

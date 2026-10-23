@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Lightbulb, Music, Rewind, FastForward, Sparkles, Trash2, Undo2, ChevronsDown, Play, Pause } from 'lucide-react'
 import { prefetch } from '../lib/audioCache'
 import { clock, recordedLabel } from '../lib/format'
-import { inboxQueue } from '../lib/library'
+import { inboxQueue, sameSitting, songIndex, suggestSongs } from '../lib/library'
 import { load, loudestAt, pause, seek, skipBy, toggle, usePlayer } from '../lib/player'
-import { getState, library, setSkipped, updateTake, useStore } from '../lib/store'
-import { DEFAULT_STATUS, type Kind, type Take } from '../lib/types'
+import { addToSong, createSong, deleteSong, updateSong, getState, library, removeFromSong, setSkipped, updateTake, useStore } from '../lib/store'
+import { DEFAULT_STATUS, type Kind, type Status, type Take } from '../lib/types'
 import { BottomSheet } from './BottomSheet'
-import { StatusPicker, TagPicker } from './SortFields'
+import { NEW_SONG, SongPicker, StatusPicker, TagPicker } from './SortFields'
 import { Waveform } from './Waveform'
 
 type Choice = 'song' | 'idea' | 'binned' | 'skip'
@@ -23,7 +23,7 @@ const THRESHOLD = 90
 export function Inbox({ onOpen }: { onOpen: (id: string) => void }) {
   const skipped = useStore((s) => s.skipped)
   const takes = useStore((s) => library(s).takes)
-  const queue = useMemo(() => inboxQueue({ takes, tags: {}, markers: {} }, skipped), [takes, skipped])
+  const queue = useMemo(() => inboxQueue({ takes, tags: {}, markers: {}, songs: {} }, skipped), [takes, skipped])
   const quickSort = useStore((s) => s.quickSort)
   const [history, setHistory] = useState<Decision[]>([])
   const [sorting, setSorting] = useState<Take | null>(null)
@@ -53,7 +53,6 @@ export function Inbox({ onOpen }: { onOpen: (id: string) => void }) {
       return
     }
     const data: Partial<Take> = { kind: choice as Kind, sorted_at: new Date().toISOString() }
-    if (choice === 'song' && !take.status) data.status = DEFAULT_STATUS
     updateTake(take.id, data)
     setSkipped(getState().skipped.filter((id) => id !== take.id))
     if (choice !== 'binned' && !quickSort) {
@@ -71,6 +70,12 @@ export function Inbox({ onOpen }: { onOpen: (id: string) => void }) {
       setSkipped(getState().skipped.filter((id) => id !== take.id))
     } else {
       updateTake(take.id, { kind: 'inbox', status: take.status, tags: take.tags, notes: take.notes, title: take.title, sorted_at: take.sorted_at })
+      // Take it back out of the song it went into, and drop the song if it was made just for it.
+      const song = songIndex(library()).get(take.id)
+      if (song) {
+        if (song.takes.length === 1) deleteSong(song.id)
+        else removeFromSong(song.id, take.id)
+      }
     }
   }
 
@@ -242,15 +247,29 @@ function SwipeCard({ take, onDecide, onTouch, onOpen }: { take: Take; onDecide: 
 }
 
 function SortSheet({ take, onClose }: { take: Take; onClose: () => void }) {
-  const live = useStore((s) => library(s).takes[take.id]) ?? take
+  const lib = useStore((s) => library(s))
+  const live = lib.takes[take.id] ?? take
+  const isSong = live.kind === 'song'
   const [title, setTitle] = useState(live.title)
   const [notes, setNotes] = useState(live.notes)
+  // Songs: start on the likeliest existing song only when it's a strong match (recorded in the same sitting).
+  const [songId, setSongId] = useState(() => {
+    const best = suggestSongs(lib, live, 1)[0]
+    return best?.takes.some((id) => lib.takes[id] && sameSitting(lib.takes[id], live)) ? best.id : NEW_SONG
+  })
+  const [songTitle, setSongTitle] = useState(live.title)
+  const [status, setStatus] = useState<Status | ''>(DEFAULT_STATUS)
+  const existing = songId !== NEW_SONG ? lib.songs[songId] : undefined
 
   const close = () => {
     const patch: Partial<Take> = {}
     if (title.trim() && title.trim() !== live.title) patch.title = title.trim()
     if (notes !== live.notes) patch.notes = notes
     if (Object.keys(patch).length) updateTake(take.id, patch)
+    if (isSong) {
+      if (existing) addToSong(existing.id, take.id)
+      else createSong({ title: songTitle.trim() || title.trim() || live.title, status: status || DEFAULT_STATUS, takes: [take.id] })
+    }
     onClose()
   }
 
@@ -258,7 +277,7 @@ function SortSheet({ take, onClose }: { take: Take; onClose: () => void }) {
     <BottomSheet
       isOpen
       onClose={close}
-      title={live.kind === 'song' ? 'Sorted as a song' : 'Sorted as an idea'}
+      title={isSong ? 'Which song is this?' : 'Sorted as an idea'}
       footer={
         <button type="button" className="btn-filled w-full" onClick={close}>
           Done, next take
@@ -266,24 +285,49 @@ function SortSheet({ take, onClose }: { take: Take; onClose: () => void }) {
       }
     >
       <div className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1.5">
-          <span className="label-section">Name</span>
-          <input id="sort-title" className="input-field" value={title} onChange={(e) => setTitle(e.target.value)} />
-        </label>
-        {live.kind === 'song' ? (
-          <div className="flex flex-col gap-1.5">
-            <span className="label-section">Status</span>
-            <StatusPicker value={live.status} onChange={(status) => updateTake(take.id, { status })} />
-          </div>
+        {isSong ? (
+          <>
+            <SongPicker take={live} value={songId} onChange={setSongId} />
+            {existing ? (
+              <div className="flex flex-col gap-1.5">
+                <span className="label-section">{existing.title} is</span>
+                <StatusPicker value={existing.status} onChange={(s) => updateSong(existing.id, { status: s })} />
+                <p className="text-xs text-ink-variant">
+                  This take goes in at #{existing.takes.filter((id) => lib.takes[id]?.kind !== 'binned' && id !== take.id).length + 1}. Rank takes on the song’s page.
+                </p>
+              </div>
+            ) : (
+              <>
+                <label className="flex flex-col gap-1.5">
+                  <span className="label-section">Song name</span>
+                  <input id="sort-song-title" className="input-field" value={songTitle} onChange={(e) => setSongTitle(e.target.value)} />
+                </label>
+                <div className="flex flex-col gap-1.5">
+                  <span className="label-section">Status</span>
+                  <StatusPicker value={status} onChange={setStatus} />
+                </div>
+              </>
+            )}
+          </>
         ) : (
-          <div className="flex flex-col gap-1.5">
-            <span className="label-section">Tags</span>
-            <TagPicker value={live.tags} onChange={(tags) => updateTake(take.id, { tags })} />
-          </div>
+          <>
+            <label className="flex flex-col gap-1.5">
+              <span className="label-section">Name</span>
+              <input id="sort-title" className="input-field" value={title} onChange={(e) => setTitle(e.target.value)} />
+            </label>
+            <div className="flex flex-col gap-1.5">
+              <span className="label-section">Tags</span>
+              <TagPicker take={live} value={live.tags} onChange={(tags) => updateTake(take.id, { tags })} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <span className="label-section">Status</span>
+              <StatusPicker optional value={live.status} onChange={(s) => updateTake(take.id, { status: s })} />
+            </div>
+          </>
         )}
         <label className="flex flex-col gap-1.5">
-          <span className="label-section">Notes</span>
-          <textarea id="sort-notes" className="input-field min-h-24" placeholder="Capo, tuning, what to try next…" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <span className="label-section">{isSong ? 'Notes on this take' : 'Notes'}</span>
+          <textarea id="sort-notes" className="input-field min-h-24" placeholder={isSong ? 'Tempo, what worked, what didn’t…' : 'Capo, tuning, what to try next…'} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
       </div>
     </BottomSheet>

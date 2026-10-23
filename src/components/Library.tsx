@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
-import { Pause, Play, Search, X } from 'lucide-react'
+import { ChevronRight, Pause, Play, Search, X } from 'lucide-react'
 import { clock, shortDate } from '../lib/format'
-import { ideaGroups, songGroups, tagsByUse, type Group } from '../lib/library'
+import { ideaGroups, songGroups, songIndex, songTakes, tagsByUse, unfiledSongTakes, type Group, type IdeaFilter } from '../lib/library'
 import { load, toggle, usePlayer } from '../lib/player'
 import { library, useStore } from '../lib/store'
-import { STATUSES, STATUS_LABEL, type Status, type Take } from '../lib/types'
+import { STATUSES, STATUS_LABEL, type Song, type Status, type Take } from '../lib/types'
 
 export function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   return (
@@ -40,45 +40,103 @@ function FilterChips<T extends string>({ options, value, onChange }: { options: 
   )
 }
 
-export function Songs({ onOpen }: { onOpen: (id: string) => void }) {
+export function Songs({ onOpen, onOpenSong }: { onOpen: (id: string) => void; onOpenSong: (id: string) => void }) {
   const lib = useStore((s) => library(s))
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<Status | 'all'>('all')
   const groups = useMemo(() => songGroups(lib, query, status), [lib, query, status])
   const all = useMemo(() => songGroups(lib, '', 'all'), [lib])
-  const count = (s: Status) => all.find((g) => g.key === s)?.takes.length ?? 0
-  const total = all.reduce((n, g) => n + g.takes.length, 0)
+  const unfiled = useMemo(() => unfiledSongTakes(lib), [lib])
+  const count = (s: Status) => all.find((g) => g.key === s)?.songs.length ?? 0
+  const total = all.reduce((n, g) => n + g.songs.length, 0)
 
   return (
-    <ListPage
-      search={<SearchBox value={query} onChange={setQuery} placeholder="Search songs and notes" />}
-      chips={<FilterChips value={status} onChange={setStatus} options={[{ value: 'all' as const, label: 'All', count: total }, ...STATUSES.map((s) => ({ value: s.value, label: s.label, count: count(s.value) }))]} />}
-      groups={groups}
-      onOpen={onOpen}
-      empty={total ? 'No songs match.' : 'No songs yet. Swipe a take right in the inbox to make it a song.'}
-      groupClass={(g) => `status-${g.key}`}
-    />
+    <div className="flex flex-col gap-3 px-4 pt-2 pb-6">
+      <SearchBox value={query} onChange={setQuery} placeholder="Search songs, takes and notes" />
+      <FilterChips value={status} onChange={setStatus} options={[{ value: 'all' as const, label: 'All', count: total }, ...STATUSES.map((s) => ({ value: s.value, label: s.label, count: count(s.value) }))]} />
+      {unfiled.length > 0 && !query && status === 'all' && (
+        <section className="flex flex-col gap-1.5">
+          <h2 className="label-section pt-2">Not in a song yet</h2>
+          <ul className="card divide-y-[1.5px] divide-outline overflow-hidden">
+            {unfiled.map((t) => (
+              <li key={t.id}>
+                <TakeRow take={t} onOpen={() => onOpen(t.id)} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {groups.length === 0 && !unfiled.length && (
+        <p className="py-10 text-center text-ink-variant">{total ? 'No songs match.' : 'No songs yet. Swipe a take right in the inbox to start one.'}</p>
+      )}
+      {groups.map((g) => (
+        <section key={g.key} className="flex flex-col gap-1.5">
+          <h2 className="label-section flex items-center gap-2 pt-2">
+            <span className={`rounded-full px-2 py-0.5 status-${g.key}`}>{g.label}</span>
+            <span className="tabular-nums">{g.songs.length}</span>
+          </h2>
+          <ul className="card divide-y-[1.5px] divide-outline overflow-hidden">
+            {g.songs.map((song) => (
+              <li key={song.id}>
+                <SongRow song={song} onOpen={() => onOpenSong(song.id)} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+/** Plays the song's best take, then the rest in rank order. */
+export function SongRow({ song, onOpen }: { song: Song; onOpen: () => void }) {
+  const lib = useStore((s) => library(s))
+  const takes = useMemo(() => songTakes(lib, song), [lib, song])
+  const best = takes[0]
+  const isCurrent = usePlayer((p) => takes.some((t) => t.id === p.takeId))
+  const playing = usePlayer((p) => p.playing && takes.some((t) => t.id === p.takeId))
+  const sub = [`${takes.length} take${takes.length === 1 ? '' : 's'}`, song.notes ? `“${song.notes.split('\n')[0].slice(0, 60)}”` : ''].filter(Boolean)
+
+  return (
+    <div className={`flex items-center gap-3 px-3 py-2.5 ${isCurrent ? 'bg-accent-container/50' : ''}`}>
+      <button
+        type="button"
+        aria-label={playing ? `Pause ${song.title}` : `Play ${song.title}`}
+        disabled={!best}
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-[1.5px] border-ink bg-sun text-ink disabled:opacity-40"
+        onClick={() => (isCurrent ? toggle() : best && void load(best, { autoplay: true, queue: takes.slice(1) }))}
+      >
+        {playing ? <Pause size={17} /> : <Play size={17} className="ml-0.5" />}
+      </button>
+      <button type="button" className="flex min-w-0 flex-1 flex-col text-left" onClick={onOpen}>
+        <span className="truncate font-semibold text-ink">{song.title}</span>
+        <span className="truncate text-xs text-ink-variant">{sub.join(' · ')}</span>
+      </button>
+      <ChevronRight size={18} className="shrink-0 text-ink-variant" />
+    </div>
   )
 }
 
 export function Ideas({ onOpen }: { onOpen: (id: string) => void }) {
   const lib = useStore((s) => library(s))
   const [query, setQuery] = useState('')
-  const [tag, setTag] = useState<string>('all')
-  const groups = useMemo(() => ideaGroups(lib, query, tag), [lib, query, tag])
+  const [filter, setFilter] = useState<IdeaFilter>('all')
+  const groups = useMemo(() => ideaGroups(lib, query, filter), [lib, query, filter])
   const tags = useMemo(() => tagsByUse(lib), [lib])
   const ideas = Object.values(lib.takes).filter((t) => t.kind === 'idea')
   const untagged = ideas.filter((t) => !t.tags.some((id) => lib.tags[id])).length
+  const statuses = STATUSES.map((s) => ({ value: `status:${s.value}`, label: s.label, count: ideas.filter((i) => i.status === s.value).length })).filter((o) => o.count)
 
   return (
     <ListPage
       search={<SearchBox value={query} onChange={setQuery} placeholder="Search ideas, tags and notes" />}
       chips={
         <FilterChips
-          value={tag}
-          onChange={setTag}
+          value={filter}
+          onChange={setFilter}
           options={[
             { value: 'all', label: 'All', count: ideas.length },
+            ...statuses,
             ...tags.map((t) => ({ value: t.id, label: `#${t.name}`, count: ideas.filter((i) => i.tags.includes(t.id)).length })),
             ...(untagged ? [{ value: 'untagged', label: 'Untagged', count: untagged }] : []),
           ]}
@@ -131,17 +189,16 @@ function PlayAll({ takes }: { takes: Take[] }) {
   )
 }
 
-export function TakeRow({ take, onOpen, queue = [] }: { take: Take; onOpen: () => void; queue?: Take[] }) {
+export function TakeRow({ take, onOpen, queue = [], hideSong = false }: { take: Take; onOpen: () => void; queue?: Take[]; hideSong?: boolean }) {
   const lib = useStore((s) => library(s))
   const isCurrent = usePlayer((p) => p.takeId === take.id)
   const playing = usePlayer((p) => p.takeId === take.id && p.playing)
-  const linked = Object.values(lib.takes).filter((t) => t.song === take.id && t.kind !== 'binned').length
+  const song = useMemo(() => (take.kind !== 'inbox' ? songIndex(lib).get(take.id) : undefined), [lib, take.id, take.kind])
   const markerCount = Object.values(lib.markers).filter((m) => m.take === take.id).length
   const sub = [
-    take.kind === 'song' && take.song ? `take of ${lib.takes[take.song]?.title ?? 'a song'}` : '',
+    song && !hideSong ? `#${songTakes(lib, song).findIndex((t) => t.id === take.id) + 1} in ${song.title}` : '',
     take.kind === 'idea' ? take.tags.map((id) => lib.tags[id] && `#${lib.tags[id].name}`).filter(Boolean).join(' ') : '',
-    take.kind === 'song' && take.status ? STATUS_LABEL[take.status] : '',
-    linked ? `${linked} linked` : '',
+    take.kind === 'idea' && take.status ? STATUS_LABEL[take.status] : '',
     markerCount ? `${markerCount} marker${markerCount > 1 ? 's' : ''}` : '',
     take.notes ? `“${take.notes.split('\n')[0].slice(0, 60)}”` : '',
   ].filter(Boolean)

@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from 'react'
 import { get, set } from 'idb-keyval'
-import { applyOps, enqueue, newId, type Library } from './ops'
+import { applyOps, enqueue, newId, TABLE, type Library } from './ops'
 import { ensureSession, isNetworkError, pb, POCKETBASE_URL, signedInEmail, statusOf } from './pb'
-import type { Collection, Marker, Op, Tag, Take } from './types'
+import type { Collection, Marker, Op, Song, Tag, Take } from './types'
 
 export interface State {
   /** What the NAS last told us. */
@@ -24,7 +24,7 @@ export interface State {
   quickSort: boolean
 }
 
-const EMPTY: Library = { takes: {}, tags: {}, markers: {} }
+const EMPTY: Library = { takes: {}, tags: {}, markers: {}, songs: {} }
 
 let state: State = {
   server: EMPTY,
@@ -88,11 +88,13 @@ export async function init() {
       get<string>(K.lastSync),
       get<boolean>(K.quick),
     ])
+    // Saved before songs were their own records: start over with a full download.
+    const stale = !!server && !server.songs
     setState({
-      server: server ?? EMPTY,
-      queue: queue ?? [],
+      server: server && !stale ? server : EMPTY,
+      queue: (stale ? queue?.filter((op) => op.col !== 'demo_takes' || op.kind !== 'update' || !('song' in op.data)) : queue) ?? [],
       skipped: skipped ?? [],
-      lastSync: lastSync ?? '',
+      lastSync: stale ? '' : (lastSync ?? ''),
       quickSort: quickSort ?? false,
       loaded: true,
     })
@@ -142,7 +144,7 @@ export function sync(opts: { full?: boolean } = {}): Promise<void> {
 async function pull(full: boolean) {
   try {
     const since = full ? '' : state.lastSync
-    const [takes, tags, markers] = await Promise.all([
+    const [takes, tags, markers, songs] = await Promise.all([
       pb.collection('demo_takes').getFullList<Take>({
         batch: 500,
         filter: since ? pb.filter('updated >= {:since}', { since }) : '',
@@ -150,6 +152,7 @@ async function pull(full: boolean) {
       }),
       pb.collection('demo_tags').getFullList<Tag>({ batch: 500, requestKey: null }),
       pb.collection('demo_markers').getFullList<Marker>({ batch: 500, requestKey: null }),
+      pb.collection('demo_songs').getFullList<Song>({ batch: 500, requestKey: null }),
     ])
     const merged = since ? { ...state.server.takes } : {}
     let lastSync = since
@@ -157,7 +160,7 @@ async function pull(full: boolean) {
       merged[t.id] = slim(t)
       if (t.updated > lastSync) lastSync = t.updated
     }
-    const server: Library = { takes: merged, tags: byId(tags), markers: byId(markers) }
+    const server: Library = { takes: merged, tags: byId(tags), markers: byId(markers), songs: byId(songs.map(slimSong)) }
     setState({ server, lastSync, reachable: true, lastError: '' })
     await Promise.all([save(K.server, server), save(K.lastSync, lastSync)])
   } catch (err) {
@@ -166,8 +169,13 @@ async function pull(full: boolean) {
 }
 
 function slim(t: Take): Take {
-  const { id, title, audio, duration, peaks, recorded_at, source_path, kind, status, tags, notes, song, sorted_at, created, updated } = t
-  return { id, title, audio, duration, peaks, recorded_at, source_path, kind, status, tags: tags ?? [], notes, song, sorted_at, created, updated }
+  const { id, title, audio, duration, peaks, recorded_at, source_path, kind, status, tags, notes, sorted_at, created, updated } = t
+  return { id, title, audio, duration, peaks, recorded_at, source_path, kind, status, tags: tags ?? [], notes, sorted_at, created, updated }
+}
+
+function slimSong(s: Song): Song {
+  const { id, title, status, notes, takes, created, updated } = s
+  return { id, title, status, notes, takes: takes ?? [], created, updated }
 }
 
 function byId<T extends { id: string }>(list: T[]): Record<string, T> {
@@ -209,10 +217,10 @@ function commit(op: Op, record: { id: string } | null, dropped = false) {
   const queue = state.queue.filter((q) => q !== op)
   let server = state.server
   if (!dropped) {
-    const key = op.col === 'demo_takes' ? 'takes' : op.col === 'demo_tags' ? 'tags' : 'markers'
+    const key = TABLE[op.col]
     const table = { ...server[key] } as Record<string, unknown>
     if (op.kind === 'delete') delete table[op.id]
-    else if (record) table[op.id] = op.col === 'demo_takes' ? slim(record as Take) : record
+    else if (record) table[op.id] = op.col === 'demo_takes' ? slim(record as Take) : op.col === 'demo_songs' ? slimSong(record as Song) : record
     server = { ...server, [key]: table }
   }
   setState({ queue, server, reachable: true })
@@ -266,6 +274,68 @@ function change(op: Op) {
 export function updateTake(id: string, data: Partial<Take>) {
   change({ kind: 'update', col: 'demo_takes', id, data })
 }
+
+// ---- songs ------------------------------------------------------------------
+
+/** Makes a song from takes, best first. Returns its id. */
+export function createSong(data: { title: string; status?: Song['status']; notes?: string; takes: string[] }): string {
+  const id = newId()
+  for (const t of data.takes) detach(t)
+  change({ kind: 'create', col: 'demo_songs', id, data: { title: data.title.trim() || 'Untitled song', status: data.status || 'to_revisit', notes: data.notes ?? '', takes: data.takes } })
+  for (const t of data.takes) markSongTake(t)
+  return id
+}
+
+export function updateSong(id: string, data: Partial<Omit<Song, 'id' | 'takes'>>) {
+  change({ kind: 'update', col: 'demo_songs', id, data })
+}
+
+/** Takes stay, as ideas (unless they're in another song). */
+export function deleteSong(id: string) {
+  const lib = library()
+  const song = lib.songs[id]
+  if (!song) return
+  change({ kind: 'delete', col: 'demo_songs', id })
+  for (const t of song.takes) if (lib.takes[t]?.kind === 'song') updateTake(t, { kind: 'idea' })
+}
+
+/** Adds a take to a song (at the end, or at a rank), taking it out of any other song. */
+export function addToSong(songId: string, takeId: string, at?: number) {
+  detach(takeId, songId)
+  const song = library().songs[songId]
+  if (!song) return
+  const rest = song.takes.filter((t) => t !== takeId)
+  const i = at === undefined ? rest.length : Math.max(0, Math.min(at, rest.length))
+  change({ kind: 'update', col: 'demo_songs', id: songId, data: { takes: [...rest.slice(0, i), takeId, ...rest.slice(i)] } })
+  markSongTake(takeId)
+}
+
+/** Takes a take out of a song. The take itself is left as it is. */
+export function removeFromSong(songId: string, takeId: string) {
+  const song = library().songs[songId]
+  if (!song?.takes.includes(takeId)) return
+  change({ kind: 'update', col: 'demo_songs', id: songId, data: { takes: song.takes.filter((t) => t !== takeId) } })
+}
+
+/** Saves a new ranking. Takes not shown in the list (binned ones) keep their place at the end. */
+export function rankSong(songId: string, ordered: string[]) {
+  const song = library().songs[songId]
+  if (!song) return
+  const takes = [...ordered, ...song.takes.filter((t) => !ordered.includes(t))]
+  if (takes.join() !== song.takes.join()) change({ kind: 'update', col: 'demo_songs', id: songId, data: { takes } })
+}
+
+function detach(takeId: string, except?: string) {
+  for (const song of Object.values(library().songs)) if (song.id !== except && song.takes.includes(takeId)) removeFromSong(song.id, takeId)
+}
+
+/** An inbox take put in a song counts as sorted. Ideas stay ideas, so they show in both places. */
+function markSongTake(takeId: string) {
+  const t = library().takes[takeId]
+  if (t && (t.kind === 'inbox' || t.kind === 'binned')) updateTake(takeId, { kind: 'song', ...(t.sorted_at ? {} : { sorted_at: new Date().toISOString() }) })
+}
+
+// ---- tags & markers ------------------------------------------------------------
 
 export function createTag(name: string): string {
   const existing = Object.values(library().tags).find((t) => t.name.toLowerCase() === name.trim().toLowerCase())

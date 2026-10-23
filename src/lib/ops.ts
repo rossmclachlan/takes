@@ -1,28 +1,25 @@
-import type { Collection, Marker, Op, Tag, Take } from './types'
+import type { Collection, Marker, Op, Song, Tag, Take } from './types'
 
 /** Everything the app shows: the NAS's records with this phone's unsent changes applied on top. */
 export interface Library {
   takes: Record<string, Take>
   tags: Record<string, Tag>
   markers: Record<string, Marker>
+  songs: Record<string, Song>
 }
+
+/** Which part of the library each collection fills. */
+export const TABLE = {
+  demo_takes: 'takes',
+  demo_tags: 'tags',
+  demo_markers: 'markers',
+  demo_songs: 'songs',
+} as const satisfies Record<Collection, keyof Library>
 
 type Table = Record<string, { id: string }>
 
-function tableFor(lib: Library, col: Collection): Table {
-  if (col === 'demo_takes') return lib.takes
-  if (col === 'demo_tags') return lib.tags
-  return lib.markers
-}
-
-function withTable(lib: Library, col: Collection, table: Table): Library {
-  if (col === 'demo_takes') return { ...lib, takes: table as Library['takes'] }
-  if (col === 'demo_tags') return { ...lib, tags: table as Library['tags'] }
-  return { ...lib, markers: table as Library['markers'] }
-}
-
 export function applyOp(lib: Library, op: Op): Library {
-  const table = tableFor(lib, op.col)
+  const table: Table = lib[TABLE[op.col]]
   const next: Table = { ...table }
   if (op.kind === 'delete') {
     delete next[op.id]
@@ -33,7 +30,7 @@ export function applyOp(lib: Library, op: Op): Library {
     if (!current) return lib // updated something the NAS no longer has
     next[op.id] = { ...current, ...op.data }
   }
-  let out = withTable(lib, op.col, next)
+  let out: Library = { ...lib, [TABLE[op.col]]: next }
   // Deleting a take's tag on the NAS doesn't touch the take, so mirror PocketBase here.
   if (op.kind === 'delete' && op.col === 'demo_tags') {
     const takes: Library['takes'] = {}

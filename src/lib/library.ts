@@ -1,5 +1,5 @@
 import type { Library } from './ops'
-import type { Status, Tag, Take } from './types'
+import type { Song, Status, Tag, Take } from './types'
 import { STATUSES } from './types'
 
 export function byRecorded(a: Take, b: Take): number {
@@ -42,22 +42,64 @@ export interface Group {
   takes: Take[]
 }
 
-/** Songs grouped by status in working order. A song's extra takes stay under the song, not in the list. */
-export function songGroups(lib: Library, query: string, status: Status | 'all'): Group[] {
-  const songs = Object.values(lib.takes).filter(
-    (t) => t.kind === 'song' && !t.song && (status === 'all' || t.status === status) && matches(t, query, lib.tags),
+export interface SongGroup {
+  key: Status
+  label: string
+  songs: Song[]
+}
+
+/** Which song each take is in. */
+export function songIndex(lib: Library): Map<string, Song> {
+  const index = new Map<string, Song>()
+  for (const song of Object.values(lib.songs)) for (const id of song.takes) if (!index.has(id)) index.set(id, song)
+  return index
+}
+
+/** A song's takes in rank order, best first, leaving out binned ones. */
+export function songTakes(lib: Library, song: Song): Take[] {
+  return song.takes.map((id) => lib.takes[id]).filter((t): t is Take => !!t && t.kind !== 'binned')
+}
+
+/** Most recently changed first; songs made on this phone and not yet saved count as newest. */
+function byUpdatedDesc(a: Song, b: Song): number {
+  return (b.updated || '\uffff').localeCompare(a.updated || '\uffff')
+}
+
+export function songMatches(lib: Library, song: Song, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  const hay = [song.title, song.notes, ...songTakes(lib, song).flatMap((t) => [t.title, t.notes])].join('\n').toLowerCase()
+  return q.split(/\s+/).every((word) => hay.includes(word))
+}
+
+/** Songs grouped by status in working order. */
+export function songGroups(lib: Library, query: string, status: Status | 'all'): SongGroup[] {
+  const songs = Object.values(lib.songs).filter(
+    (s) => (status === 'all' || (s.status || 'to_revisit') === status) && songMatches(lib, s, query),
   )
   return STATUSES.map(({ value, label }) => ({
     key: value,
     label,
-    takes: songs.filter((t) => (t.status || 'to_revisit') === value).sort(bySortedDesc),
-  })).filter((g) => g.takes.length)
+    songs: songs.filter((s) => (s.status || 'to_revisit') === value).sort(byUpdatedDesc),
+  })).filter((g) => g.songs.length)
 }
 
+/** Takes sorted as songs that haven't been put in a song yet (quick sort skips that step). */
+export function unfiledSongTakes(lib: Library): Take[] {
+  const index = songIndex(lib)
+  return Object.values(lib.takes)
+    .filter((t) => t.kind === 'song' && !index.has(t.id))
+    .sort(bySortedDesc)
+}
+
+export type IdeaFilter = 'all' | 'untagged' | `status:${Status}` | string
+
 /** Ideas grouped by tag; an idea with several tags shows under each. Untagged ones come last. */
-export function ideaGroups(lib: Library, query: string, tagFilter: string | 'all' | 'untagged'): Group[] {
+export function ideaGroups(lib: Library, query: string, filter: IdeaFilter): Group[] {
+  const status = filter.startsWith('status:') ? filter.slice(7) : ''
+  const tagFilter = status ? 'all' : filter
   const ideas = Object.values(lib.takes)
-    .filter((t) => t.kind === 'idea' && matches(t, query, lib.tags))
+    .filter((t) => t.kind === 'idea' && (!status || t.status === status) && matches(t, query, lib.tags))
     .sort(bySortedDesc)
   if (tagFilter === 'untagged') {
     const list = ideas.filter((t) => !t.tags.some((id) => lib.tags[id]))
@@ -83,15 +125,93 @@ export function tagsByUse(lib: Library): Tag[] {
   )
 }
 
-/** Takes linked to a song: its other takes and the ideas that belong to it. */
-export function linkedTo(lib: Library, songId: string): Take[] {
+const HOUR = 3600_000
+const SESSION = 3 * HOUR
+
+function when(t: Take): number {
+  return Date.parse((t.recorded_at || t.created).replace(' ', 'T'))
+}
+
+/** Recorded within a few hours of each other, so probably the same session. */
+export function sameSitting(a: Take, b: Take): boolean {
+  return Math.abs(when(a) - when(b)) < SESSION
+}
+
+function words(text: string): Set<string> {
+  return new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !/^\d+$/.test(w) && !STOP.has(w)))
+}
+const STOP = new Set(['the', 'and', 'take', 'idea', 'song', 'recording', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'at'])
+
+/**
+ * Tags to offer for a take, best guess first: ones on takes recorded in the
+ * same sitting, ones named in its title or notes, ones used on the last few
+ * ideas sorted, then the most used.
+ */
+export function suggestTags(lib: Library, take: Take, limit = 6): Tag[] {
+  const score = new Map<string, number>()
+  const add = (id: string, n: number) => lib.tags[id] && score.set(id, (score.get(id) ?? 0) + n)
+  const at = when(take)
+  const others = Object.values(lib.takes).filter((t) => t.id !== take.id && t.tags.length)
+  for (const t of others) {
+    const gap = Math.abs(when(t) - at)
+    if (gap < SESSION) for (const id of t.tags) add(id, 6 * (1 - gap / SESSION) + 2)
+  }
+  const recent = others.filter((t) => t.sorted_at).sort(bySortedDesc).slice(0, 8)
+  recent.forEach((t, i) => t.tags.forEach((id) => add(id, 3 * (1 - i / 8))))
+  const named = words(`${take.title} ${take.notes}`)
+  for (const tag of Object.values(lib.tags)) {
+    if ([...words(tag.name)].some((w) => named.has(w))) add(tag.id, 8)
+  }
+  tagsByUse(lib).forEach((t, i) => add(t.id, Math.max(0, 1 - i / 20)))
+  return [...score.entries()]
+    .filter(([id]) => !take.tags.includes(id))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([id]) => lib.tags[id])
+}
+
+/**
+ * Songs a take is likely another take of: ones with takes recorded in the same
+ * sitting, ones whose name shares a word with the take, then the songs added
+ * to most recently.
+ */
+export function suggestSongs(lib: Library, take: Take, limit = 5): Song[] {
+  const at = when(take)
+  const named = words(`${take.title} ${take.notes}`)
+  const scored = Object.values(lib.songs).map((song) => {
+    let n = 0
+    const takes = songTakes(lib, song).filter((t) => t.id !== take.id)
+    for (const t of takes) {
+      const gap = Math.abs(when(t) - at)
+      if (gap < SESSION) n += 6 * (1 - gap / SESSION) + 3
+    }
+    if ([...words(song.title)].some((w) => named.has(w))) n += 8
+    const lastSorted = takes.reduce((m, t) => (t.sorted_at > m ? t.sorted_at : m), '')
+    return { song, n, lastSorted: lastSorted || song.updated || '\uffff' }
+  })
+  return scored
+    .sort((a, b) => b.n - a.n || b.lastSorted.localeCompare(a.lastSorted))
+    .slice(0, limit)
+    .map((s) => s.song)
+}
+
+/**
+ * Takes to offer when adding to a song: recorded near the song's takes first,
+ * then the rest newest first. Binned takes and the song's own are left out.
+ */
+export function candidateTakes(lib: Library, song: Song, query: string): Take[] {
+  const mine = songTakes(lib, song)
+  const times = mine.map(when)
+  const near = (t: Take) => (times.length ? Math.min(...times.map((x) => Math.abs(when(t) - x))) : Infinity)
   return Object.values(lib.takes)
-    .filter((t) => t.song === songId && t.kind !== 'binned')
-    .sort(byRecorded)
+    .filter((t) => t.kind !== 'binned' && !song.takes.includes(t.id) && matches(t, query, lib.tags))
+    .map((t) => ({ t, gap: near(t) }))
+    .sort((a, b) => (a.gap < SESSION || b.gap < SESSION ? a.gap - b.gap : when(b.t) - when(a.t)))
+    .map((x) => x.t)
 }
 
 export function counts(lib: Library) {
-  const c = { inbox: 0, song: 0, idea: 0, binned: 0 }
+  const c = { inbox: 0, song: 0, idea: 0, binned: 0, songs: Object.keys(lib.songs).length }
   for (const t of Object.values(lib.takes)) c[t.kind]++
   return c
 }

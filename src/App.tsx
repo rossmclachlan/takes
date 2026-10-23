@@ -4,6 +4,7 @@ import { Detail } from './components/Detail'
 import { Ideas, Songs } from './components/Library'
 import { Inbox } from './components/Inbox'
 import { Menu } from './components/Menu'
+import { SongPage } from './components/SongPage'
 import { MiniPlayer } from './components/MiniPlayer'
 import { SignIn, TapeLogo } from './components/SignIn'
 import { counts } from './lib/library'
@@ -49,6 +50,7 @@ export default function App() {
     setDetail((d) => [...d, id])
     window.scrollTo(0, 0)
   }
+  const openSong = (id: string) => open(`song:${id}`)
   const back = () => history.back()
   const setTab = (t: Tab) => {
     if (detail.length) history.go(-detail.length)
@@ -68,12 +70,14 @@ export default function App() {
     <div className="paper relative mx-auto flex h-full max-w-[640px] flex-col">
       <TopBar onMenu={() => setMenuOpen(true)} />
       <main className="min-h-0 flex-1 overflow-y-auto">
-        {current ? (
-          <Detail key={current} id={current} onBack={back} onOpen={open} />
+        {current?.startsWith('song:') ? (
+          <SongPage key={current} id={current.slice(5)} onBack={back} onOpen={open} />
+        ) : current ? (
+          <Detail key={current} id={current} onBack={back} onOpenSong={openSong} />
         ) : tab === 'inbox' ? (
           <Inbox onOpen={open} />
         ) : tab === 'songs' ? (
-          <Songs onOpen={open} />
+          <Songs onOpen={open} onOpenSong={openSong} />
         ) : (
           <Ideas onOpen={open} />
         )}
@@ -110,7 +114,7 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
 function BottomNav({ tab, onChange }: { tab: Tab | null; onChange: (t: Tab) => void }) {
   const lib = useStore((s) => library(s))
   const c = useMemo(() => counts(lib), [lib])
-  const n: Record<Tab, number> = { inbox: c.inbox, songs: c.song, ideas: c.idea }
+  const n: Record<Tab, number> = { inbox: c.inbox, songs: c.songs, ideas: c.idea }
   return (
     <nav className="z-40 shrink-0 border-t-[1.5px] border-outline bg-bg pb-[env(safe-area-inset-bottom)]">
       <div className="flex items-stretch justify-around py-2">
