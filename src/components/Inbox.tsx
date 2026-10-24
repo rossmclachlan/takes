@@ -4,7 +4,7 @@ import { prefetch } from '../lib/audioCache'
 import { clock, recordedLabel } from '../lib/format'
 import { inboxQueue, sameSitting, songIndex, suggestSongs } from '../lib/library'
 import { load, loudestAt, pause, seek, skipBy, toggle, usePlayer } from '../lib/player'
-import { addToSong, createSong, deleteSong, updateSong, getState, library, removeFromSong, setSkipped, updateTake, useStore } from '../lib/store'
+import { addToSong, createSong, deleteSong, songNamed, updateSong, getState, library, removeFromSong, setSkipped, updateTake, useStore } from '../lib/store'
 import { DEFAULT_STATUS, type Kind, type Status, type Take } from '../lib/types'
 import { BottomSheet } from './BottomSheet'
 import { NEW_SONG, SongPicker, StatusPicker, TagPicker } from './SortFields'
@@ -260,6 +260,8 @@ function SortSheet({ take, onClose }: { take: Take; onClose: () => void }) {
   const [songTitle, setSongTitle] = useState(live.title)
   const [status, setStatus] = useState<Status | ''>(DEFAULT_STATUS)
   const existing = songId !== NEW_SONG ? lib.songs[songId] : undefined
+  // Typing an existing song's name adds the take to that song rather than making a second one.
+  const sameName = !existing ? songNamed(songTitle) : undefined
 
   const close = () => {
     const patch: Partial<Take> = {}
@@ -301,11 +303,14 @@ function SortSheet({ take, onClose }: { take: Take; onClose: () => void }) {
                 <label className="flex flex-col gap-1.5">
                   <span className="label-section">Song name</span>
                   <input id="sort-song-title" className="input-field" value={songTitle} onChange={(e) => setSongTitle(e.target.value)} />
+                  {sameName && <span className="text-xs text-ink-variant">You already have “{sameName.title}”, so this take will go in it.</span>}
                 </label>
-                <div className="flex flex-col gap-1.5">
-                  <span className="label-section">Status</span>
-                  <StatusPicker value={status} onChange={setStatus} />
-                </div>
+                {!sameName && (
+                  <div className="flex flex-col gap-1.5">
+                    <span className="label-section">Status</span>
+                    <StatusPicker value={status} onChange={setStatus} />
+                  </div>
+                )}
               </>
             )}
           </>

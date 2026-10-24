@@ -3,7 +3,7 @@ import { ArrowLeft, GripVertical, Pause, Play, Plus, Trash2, X } from 'lucide-re
 import { clock, shortDate } from '../lib/format'
 import { candidateTakes, songTakes } from '../lib/library'
 import { load, toggle, usePlayer } from '../lib/player'
-import { addToSong, deleteSong, library, rankSong, removeFromSong, updateSong, useStore } from '../lib/store'
+import { addToSong, deleteSong, library, mergeSongs, rankSong, removeFromSong, songNamed, updateSong, useStore } from '../lib/store'
 import type { Song, Take } from '../lib/types'
 import { BottomSheet } from './BottomSheet'
 import { SearchBox } from './Library'
@@ -36,6 +36,8 @@ export function SongPage({ id, onBack, onOpen }: { id: string; onBack: () => voi
       </div>
 
       <TitleField key={song.title} song={song} />
+
+      <DuplicateNotice song={song} />
 
       <StatusPicker value={song.status} onChange={(status) => updateSong(song.id, { status })} />
 
@@ -283,5 +285,23 @@ function NotesField({ song }: { song: Song }) {
         }}
       />
     </label>
+  )
+}
+
+/** Another song with the same name: offer to fold it into this one. */
+function DuplicateNotice({ song }: { song: Song }) {
+  const lib = useStore((s) => library(s))
+  const other = useMemo(() => songNamed(song.title, song.id), [lib, song.title, song.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!other) return null
+  const count = other.takes.filter((id) => lib.takes[id] && lib.takes[id].kind !== 'binned').length
+  return (
+    <div className="card flex flex-col gap-2 p-3">
+      <p className="text-sm text-ink">
+        There’s another song called “{other.title}” with {count} take{count === 1 ? '' : 's'}.
+      </p>
+      <button type="button" className="btn-tonal self-start" onClick={() => mergeSongs(song.id, other.id)}>
+        Merge its takes into this one
+      </button>
+    </div>
   )
 }

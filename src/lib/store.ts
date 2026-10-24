@@ -277,8 +277,23 @@ export function updateTake(id: string, data: Partial<Take>) {
 
 // ---- songs ------------------------------------------------------------------
 
-/** Makes a song from takes, best first. Returns its id. */
+/** The song with this name, ignoring case and spacing, if there is one. */
+export function songNamed(title: string, except?: string): Song | undefined {
+  const key = normalTitle(title)
+  return key ? Object.values(library().songs).find((s) => s.id !== except && normalTitle(s.title) === key) : undefined
+}
+
+function normalTitle(title: string): string {
+  return title.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/** Makes a song from takes, best first, or adds them to the song that already has that name. Returns its id. */
 export function createSong(data: { title: string; status?: Song['status']; notes?: string; takes: string[] }): string {
+  const same = songNamed(data.title)
+  if (same) {
+    for (const t of data.takes) addToSong(same.id, t)
+    return same.id
+  }
   const id = newId()
   for (const t of data.takes) detach(t)
   change({ kind: 'create', col: 'demo_songs', id, data: { title: data.title.trim() || 'Untitled song', status: data.status || 'to_revisit', notes: data.notes ?? '', takes: data.takes } })
@@ -297,6 +312,18 @@ export function deleteSong(id: string) {
   if (!song) return
   change({ kind: 'delete', col: 'demo_songs', id })
   for (const t of song.takes) if (lib.takes[t]?.kind === 'song') updateTake(t, { kind: 'idea' })
+}
+
+/** Moves one song's takes (after its own) and notes into another, then deletes it. */
+export function mergeSongs(intoId: string, fromId: string) {
+  const lib = library()
+  const into = lib.songs[intoId]
+  const from = lib.songs[fromId]
+  if (!into || !from || into.id === from.id) return
+  const takes = [...into.takes, ...from.takes.filter((t) => !into.takes.includes(t))]
+  const notes = [into.notes.trim(), from.notes.trim()].filter(Boolean).join('\n\n')
+  change({ kind: 'update', col: 'demo_songs', id: intoId, data: { takes, notes, ...(into.status ? {} : { status: from.status }) } })
+  change({ kind: 'delete', col: 'demo_songs', id: fromId })
 }
 
 /** Adds a take to a song (at the end, or at a rank), taking it out of any other song. */
